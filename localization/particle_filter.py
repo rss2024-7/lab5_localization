@@ -7,6 +7,8 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.node import Node
 import rclpy
 
+import numpy as np
+
 assert rclpy
 
 
@@ -74,6 +76,16 @@ class ParticleFilter(Node):
         #
         # Publish a transformation frame between the map
         # and the particle_filter_frame.
+
+    def odom_callback(self, msg):
+        pass
+
+    def laser_callback(self, msg):
+        self.laser_ranges = np.random.choice(np.array(msg.ranges), 100)
+
+
+    def pose_callback(self, msg):
+        pass
 
 
 def main(args=None):
