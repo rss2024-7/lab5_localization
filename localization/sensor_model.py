@@ -3,6 +3,8 @@ from scan_simulator_2d import PyScanSimulator2D
 # Try to change to just `from scan_simulator_2d import PyScanSimulator2D` 
 # if any error re: scan_simulator_2d occurs
 
+import matplotlib.pyplot as plt
+
 from tf_transformations import euler_from_quaternion
 
 from nav_msgs.msg import OccupancyGrid
