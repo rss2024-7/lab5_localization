@@ -1,5 +1,6 @@
 import numpy as np
 from scan_simulator_2d import PyScanSimulator2D
+from mpl_toolkits.mplot3d import Axes3D
 # Try to change to just `from scan_simulator_2d import PyScanSimulator2D` 
 # if any error re: scan_simulator_2d occurs
 
@@ -106,8 +107,8 @@ class SensorModel:
         p_hit /= np.sum(p_hit, axis = 0)
         
         # Case 2 - probability of short measurement
-        if 0 <= z <= d and d != 0:
-            p_short[np.where(z <= d & d != 0)] = 2/d * (1 - z/d)
+        short_indices = np.where(np.logical_and(z <= d, d != 0))
+        p_short[short_indices] = 2/d[short_indices] * (1 - z[short_indices]/d[short_indices])
             
         # Case 3 - probability of large measurement
         p_max[np.where(z == z_max)] = 1
@@ -115,7 +116,7 @@ class SensorModel:
         # Case 4 - probability of completely random measurement
         # p_rand = 1 / z_max
 
-        self.sensor_model_table = self.a_hit * p_hit + self.a_short * p_short + self.a_max * p_max + self.a_rand * p_rand
+        self.sensor_model_table = self.alpha_hit * p_hit + self.alpha_short * p_short + self.alpha_max * p_max + self.alpha_rand * p_rand
 
         # normalize entire sensor model
         self.sensor_model_table /= np.sum(self.sensor_model_table, axis=0)

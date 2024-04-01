@@ -4,6 +4,8 @@ from localization.motion_model import MotionModel
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
 
+from sensor_msgs.msg import LaserScan
+
 from rclpy.node import Node
 import rclpy
 
