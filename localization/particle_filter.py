@@ -5,8 +5,12 @@ from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
 
+from sensor_msgs.msg import LaserScan
+
 from rclpy.node import Node
 import rclpy
+
+import tf_transformations
 
 import numpy as np
 
@@ -66,6 +70,8 @@ class ParticleFilter(Node):
         self.motion_model = MotionModel(self)
         self.sensor_model = SensorModel(self)
 
+        self.particles = None  # TODO: initialization procedure for particles
+
         self.get_logger().info("=============+READY+=============")
 
         # Implement the MCL algorithm
@@ -79,7 +85,19 @@ class ParticleFilter(Node):
         # and the particle_filter_frame.
 
     def odom_callback(self, msg):
-        pass
+        # Odometry message
+        pose = msg.pose
+
+        # [x, y, theta]
+        odometry = [msg.pose.pose.position.x, msg.pose.pose.position.y, 
+                    tf_transformations.euler_from_quaternion([msg.pose.pose.orientation.x, 
+                                                              msg.pose.pose.orientation.y, 
+                                                              msg.pose.pose.orientation.z, 
+                                                              msg.pose.pose.orientation.w])[2]]
+
+        # self.get_logger().info(f"odometry: {odometry}")
+
+        self.motion_model.evaluate(self.particles, odometry)
 
     def laser_callback(self, msg):
         self.laser_ranges = np.random.choice(np.array(msg.ranges), 100)

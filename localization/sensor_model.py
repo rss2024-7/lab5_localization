@@ -1,5 +1,6 @@
 import numpy as np
 from scan_simulator_2d import PyScanSimulator2D
+from mpl_toolkits.mplot3d import Axes3D
 # Try to change to just `from scan_simulator_2d import PyScanSimulator2D` 
 # if any error re: scan_simulator_2d occurs
 
@@ -106,8 +107,8 @@ class SensorModel:
         p_hit /= np.sum(p_hit, axis = 0)
         
         # Case 2 - probability of short measurement
-        if 0 <= z <= d and d != 0:
-            p_short[np.where(z <= d & d != 0)] = 2/d * (1 - z/d)
+        short_indices = np.where(np.logical_and(z <= d, d != 0))
+        p_short[short_indices] = 2/d[short_indices] * (1 - z[short_indices]/d[short_indices])
             
         # Case 3 - probability of large measurement
         p_max[np.where(z == z_max)] = 1
@@ -115,35 +116,12 @@ class SensorModel:
         # Case 4 - probability of completely random measurement
         # p_rand = 1 / z_max
 
-        self.sensor_model_table = self.a_hit * p_hit + self.a_short * p_short + self.a_max * p_max + self.a_rand * p_rand
+        self.sensor_model_table = self.alpha_hit * p_hit + self.alpha_short * p_short + self.alpha_max * p_max + self.alpha_rand * p_rand
 
-        # normalize entire sensor model
+        # normalize entire sensor model (So probabilities sum to 1)
         self.sensor_model_table /= np.sum(self.sensor_model_table, axis=0)
     
         return
-
-        for z in range(self.table_width):
-            for d in range(self.table_width):
-                # Case 1 - probability of detecting known obstacle in map
-                eta = 1
-                p_hit = np.exp( - (z - d)**2 / (2 * self.sigma_hit**2) )
-                p_hit *= eta / np.sqrt(2 * np.pi * self.sigma_hit**2)
-                
-                # Case 2 - probability of short measurement
-                p_short = 0
-                if 0 <= z <= d and d != 0:
-                    p_short = 2/d * (1 - z/d)
-                    
-                # Case 3 - probability of large measurement
-                p_max = 0
-                if z == z_max:
-                    p_max = 1
-                    
-                # Case 4 - probability of completely random measurement
-                p_rand = 0
-                p_rand = 1 / z_max
-
-                self.sensor_model_table[z, d] = self.a_hit * p_hit + self.a_short * p_short + self.a_max * p_max + self.a_rand * p_rand
 
 
     def evaluate(self, particles, observation):
@@ -178,7 +156,7 @@ class SensorModel:
         # to perform ray tracing from all the particles.
         # This produces a matrix of size N x num_beams_per_particle 
 
-        # n (number of particles) x m (number of lidar beams per scan)
+        # n (number of particles) x num_beams_per_particle
         scans = self.scan_sim.scan(particles)
         
         # convert units from meters to pixels
@@ -189,15 +167,14 @@ class SensorModel:
         z_max = self.table_width - 1
         scans = np.clip(scans, 0, z_max)
 
-        # vector of length n (number of particles) containing shortest laserscan
-        # distance for each particle
-        d = np.min(scans, axis=1)
+        # Index the sensor model table with observation to get a 100 x 201 array
+        # Then, use scans to select the relevant probabilities for each particle
+        # This results in an n x 100 array where each row corresponds to a particle
+        selected_probabilities = self.sensor_model_table[observation][:, scans]
 
-        # only look at useful values and get product of each column
-        # vector of length n (number of particles)
-        return np.prod(self.sensor_model_table[observation, :][:, d], axis=0)
-
-
+        # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
+        # length n vector containing probability of each particle being correct
+        return np.sum(np.log(selected_probabilities), axis=1)
         ####################################
 
     def map_callback(self, map_msg):
