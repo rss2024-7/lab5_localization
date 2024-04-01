@@ -178,19 +178,23 @@ class SensorModel:
         # to perform ray tracing from all the particles.
         # This produces a matrix of size N x num_beams_per_particle 
 
+        # n (number of particles) x m (number of lidar beams per scan)
         scans = self.scan_sim.scan(particles)
         
-        # convert to pixels
+        # convert units from meters to pixels
         scans /= self.map_resolution * self.lidar_scale_to_map_scale
         observation /= self.map_resolution * self.lidar_scale_to_map_scale
 
-        # clip values
+        # clip values (cap their values at z_max) in scans matrix
         z_max = self.table_width - 1
         scans = np.clip(scans, 0, z_max)
 
+        # vector of length n (number of particles) containing shortest laserscan
+        # distance for each particle
         d = np.min(scans, axis=1)
 
         # only look at useful values and get product of each column
+        # vector of length n (number of particles)
         return np.prod(self.sensor_model_table[observation, :][:, d], axis=0)
 
 

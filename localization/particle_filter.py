@@ -1,5 +1,6 @@
 from localization.sensor_model import SensorModel
 from localization.motion_model import MotionModel
+from sensor_msgs.msg import LaserScan
 
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
