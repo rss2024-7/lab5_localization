@@ -155,22 +155,23 @@ class SensorModel:
         # You will probably want to use this function
         # to perform ray tracing from all the particles.
         # This produces a matrix of size N x num_beams_per_particle 
-
+        
         scans = self.scan_sim.scan(particles)
         
         # convert to pixels
-        scans /= self.map_resolution * self.lidar_scale_to_map_scale
-        observation /= self.map_resolution * self.lidar_scale_to_map_scale
+        scans /= self.resolution * self.lidar_scale_to_map_scale
+        observation /= self.resolution * self.lidar_scale_to_map_scale
 
         # clip values
         z_max = self.table_width - 1
-        scans = np.clip(scans, 0, z_max)
+        observation = np.floor(np.clip(observation, 0, z_max)).astype(int)
+        scans = np.floor(np.clip(scans, 0, z_max)).astype(int)
 
-        # TODO: Make sure getting d value from ray tracing correctly
-        d = np.min(scans, axis=1)
+        selected_probabilities = self.sensor_model_table[observation][:, scans]
 
-        # only look at useful values and get product of each column
-        return np.prod(self.sensor_model_table[observation, :][:, d], axis=0)
+        # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
+        # length n vector containing probability of each particle being correct
+        return np.exp(np.sum(np.log(selected_probabilities), axis=1))
 
 
         ####################################
