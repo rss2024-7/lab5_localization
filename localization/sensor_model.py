@@ -123,29 +123,6 @@ class SensorModel:
     
         return
 
-        for z in range(self.table_width):
-            for d in range(self.table_width):
-                # Case 1 - probability of detecting known obstacle in map
-                eta = 1
-                p_hit = np.exp( - (z - d)**2 / (2 * self.sigma_hit**2) )
-                p_hit *= eta / np.sqrt(2 * np.pi * self.sigma_hit**2)
-                
-                # Case 2 - probability of short measurement
-                p_short = 0
-                if 0 <= z <= d and d != 0:
-                    p_short = 2/d * (1 - z/d)
-                    
-                # Case 3 - probability of large measurement
-                p_max = 0
-                if z == z_max:
-                    p_max = 1
-                    
-                # Case 4 - probability of completely random measurement
-                p_rand = 0
-                p_rand = 1 / z_max
-
-                self.sensor_model_table[z, d] = self.a_hit * p_hit + self.a_short * p_short + self.a_max * p_max + self.a_rand * p_rand
-
 
     def evaluate(self, particles, observation):
         """
@@ -189,6 +166,7 @@ class SensorModel:
         z_max = self.table_width - 1
         scans = np.clip(scans, 0, z_max)
 
+        # TODO: Make sure getting d value from ray tracing correctly
         d = np.min(scans, axis=1)
 
         # only look at useful values and get product of each column
