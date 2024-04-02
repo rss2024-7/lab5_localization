@@ -172,8 +172,8 @@ class SensorModel:
         # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
         # length n vector containing probability of each particle being correct
         
-        likelihoods = np.sum(np.log(selected_probabilities), axis=1)
-        return likelihoods / np.sum(likelihoods)
+        likelihoods = np.exp(np.sum(np.log(selected_probabilities), axis=1))
+        return likelihoods 
 
 
         ####################################
