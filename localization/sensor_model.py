@@ -167,11 +167,13 @@ class SensorModel:
         observation = np.floor(np.clip(observation, 0, z_max)).astype(int)
         scans = np.floor(np.clip(scans, 0, z_max)).astype(int)
 
-        selected_probabilities = self.sensor_model_table[observation][:, scans]
+        selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
 
         # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
         # length n vector containing probability of each particle being correct
-        return np.exp(np.sum(np.log(selected_probabilities), axis=1))
+        
+        likelihoods = np.sum(np.log(selected_probabilities), axis=1)
+        return likelihoods / np.sum(likelihoods)
 
 
         ####################################

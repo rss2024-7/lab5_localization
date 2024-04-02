@@ -83,7 +83,10 @@ class ParticleFilter(Node):
         self.particle_samples_indices = np.array([])
 
     def publish_avg_pose(self):
-        particle_samples = self.particle_positions[self.particle_samples_indices, :] if len(self.particle_samples_indices) != 0 else self.particle_positions
+        particle_samples = self.particle_positions
+        if len(self.particle_samples_indices) != 0:
+            particle_samples = self.particle_positions[self.particle_samples_indices, :]
+
         positions = particle_samples[:, :2]
         angles = particle_samples[:, 2]
 
@@ -123,9 +126,10 @@ class ParticleFilter(Node):
         if len(self.particle_positions) == 0: return
         laser_ranges = np.random.choice(np.array(msg.ranges), 100)
         weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
-        if weights is None: return
-        
-        print(weights)
+        if weights is None:
+            # print("no weights") 
+            return
+
         M = len(weights)
         self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
 
@@ -137,7 +141,13 @@ class ParticleFilter(Node):
         angle = msg.pose.pose.orientation.w
 
         pose = np.array([[x, y , angle]])
-        self.particle_positions = np.vstack((self.particle_positions, pose)) if len(self.particle_positions) != 0 else pose
+        if len(self.particle_positions) != 0:
+            self.particle_positions = np.vstack((self.particle_positions, pose)) 
+        else:
+            self.particle_positions = pose
+
+
+        
 
 
 def main(args=None):
