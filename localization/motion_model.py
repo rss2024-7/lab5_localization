@@ -45,10 +45,10 @@ class MotionModel:
             return X
         
         # add noise
-        particles_random_noise = np.random.normal(0, 0.05, particles.shape)
-        particles += particles_random_noise
-        odometry_random_noise = np.random.normal(0, 0.05, odometry.shape)
-        odometry += odometry_random_noise
+        # particles_random_noise = np.random.normal(0, 0.05, particles.shape)
+        # particles += particles_random_noise
+        # odometry_random_noise = np.random.normal(0, 0.05, odometry.shape)
+        # odometry += odometry_random_noise
 
         # 3N x 3 Matrix (every particles row converted to transform matrix)
         all_transforms = np.apply_along_axis(transform_matrix, axis=1, arr=particles)
@@ -60,8 +60,14 @@ class MotionModel:
         
         # convert back to original form (N x 3 matrix)
         poses = np.zeros(particles.shape)
-        poses[:, 2] = np.apply_along_axis(np.arccos, axis=0, arr=all_transforms[::3, 0])
-        poses[:, :2] = all_transforms[:, 2].reshape((particles.shape[0], 3))[:, :2]
+
+        # each row is the first column of the rotation matrices for each particle
+        rotations = all_transforms[:, 0].reshape(particles.shape[0], 3) 
+        poses[:, 2] = np.arctan2(rotations[:, 1], rotations[:, 0])
+
+        # each row is the last column of the transformation matrix for each particle
+        positions = all_transforms[:, 2].reshape((particles.shape[0], 3))
+        poses[:, :2] = positions[:, :2]
         
         return poses
 

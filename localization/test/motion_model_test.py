@@ -48,7 +48,7 @@ class MotionModelTest(Node):
 
         assert np.allclose(actual_theta,
                            expected_theta,
-                           rtol=self.tol), f"Thetas are not quite right (modulo 2pi)! Expected {expected_theta}, got {actual_theta}"
+                           rtol=self.tol), f"Thetas are not quite right (modulo 2pi)! Expected {expected_theta}, got {actual_theta}. Difference: {expected_theta - actual_theta}"
 
         self.get_logger().info("Motion model test passed!")
         exit()
