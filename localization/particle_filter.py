@@ -1,6 +1,5 @@
 from localization.sensor_model import SensorModel
 from localization.motion_model import MotionModel
-from sensor_msgs.msg import LaserScan
 
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -10,9 +9,9 @@ from sensor_msgs.msg import LaserScan
 from rclpy.node import Node
 import rclpy
 
-import tf_transformations
-
 import numpy as np
+import math
+import time
 
 assert rclpy
 
@@ -24,6 +23,10 @@ class ParticleFilter(Node):
 
         self.declare_parameter('particle_filter_frame', "default")
         self.particle_filter_frame = self.get_parameter('particle_filter_frame').get_parameter_value().string_value
+
+        self.declare_parameter('num_particles', "default")
+        self.num_particles = self.get_parameter('num_particles').get_parameter_value().integer_value
+
 
         #  *Important Note #1:* It is critical for your particle
         #     filter to obtain the following topic names from the
@@ -70,8 +73,6 @@ class ParticleFilter(Node):
         self.motion_model = MotionModel(self)
         self.sensor_model = SensorModel(self)
 
-        self.particles = None  # TODO: initialization procedure for particles
-
         self.get_logger().info("=============+READY+=============")
 
         # Implement the MCL algorithm
@@ -85,10 +86,18 @@ class ParticleFilter(Node):
         # and the particle_filter_frame.
         self.particle_positions = np.array([])
         self.laser_ranges = np.array([])
+
+        # the more often the value i appears in particle_samples_indices, the higher
+        # the weight of the pose particle_positions[i]
         self.particle_samples_indices = np.array([])
 
+        self.previous_time = time.perf_counter()
+
     def publish_avg_pose(self):
-        particle_samples = self.particle_positions[self.particle_samples_indices, :] if len(self.particle_samples_indices) != 0 else self.particle_positions
+        particle_samples = self.particle_positions
+        if len(self.particle_samples_indices) != 0:
+            particle_samples = self.particle_positions[self.particle_samples_indices, :]
+
         positions = particle_samples[:, :2]
         angles = particle_samples[:, 2]
 
@@ -98,55 +107,90 @@ class ParticleFilter(Node):
         average_pose = np.hstack((average_position, average_angle))
 
         msg = Odometry()
+
+        msg.header.frame_id = '/map'
         
         msg.pose.pose.position.x = average_pose[0]
         msg.pose.pose.position.y = average_pose[1]
 
+        # rotation is around z-axis
         msg.pose.pose.orientation.x = 0.0
         msg.pose.pose.orientation.y = 0.0
-        msg.pose.pose.orientation.z = 1.0
-        msg.pose.pose.orientation.w = average_angle
+        msg.pose.pose.orientation.z = np.sin(average_angle / 2)
+        msg.pose.pose.orientation.w = np.cos(average_angle / 2)
+
+        print(f"estimated_pose: {average_pose[0]}, {average_pose[1]}, {average_angle}")
 
         msg.child_frame_id = '/base_link'
+        # self.get_logger().info("%s" % average_pose)
+        # self.get_logger().info("%s" % average_angle)
         self.odom_pub.publish(msg)
 
     def odom_callback(self, msg):
         if len(self.particle_positions) == 0: return
 
-        x = msg.twist.twist.linear.x
-        y = msg.twist.twist.linear.y
-        angle = msg.twist.twist.angular.z
+        # manually time dt
+        current_time = time.perf_counter()  # maybe rclpy.time.Time()?
+        dt = current_time-self.previous_time
 
-        odometry = np.array([x, y, angle])
+        # relative to robot frame
+        x_vel = msg.twist.twist.linear.x
+        y_vel = msg.twist.twist.linear.y
+        angle_vel = msg.twist.twist.angular.z
+        
+        odometry = np.array([x_vel * dt, y_vel * dt, angle_vel * dt])
 
         # print(self.particle_positions)
-        self.motion_model.evaluate(self.particle_positions, odometry)
+        self.particle_positions = self.motion_model.evaluate(self.particle_positions, odometry)
 
         self.publish_avg_pose()
 
+        self.previous_time = current_time
+
     def laser_callback(self, msg):
-        if len(self.particle_positions) == 0: 
-            self.get_logger().info(f"self.particle_positions is empty.")
-            return
+        if len(self.particle_positions) == 0: return
         laser_ranges = np.random.choice(np.array(msg.ranges), 100)
         weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
-        if weights is None: 
-            self.get_logger().info(f"self.sensor_model.evaluate() returned empty weights.")
+        if weights is None:
+            # print("no weights") 
             return
-        
-        self.get_logger().info(f"np.shape(weights): {np.shape(weights)}")
+
         M = len(weights)
+        weights /= np.sum(weights) # normalize so they add to 1
         self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
+
+        self.particle_positions = self.particle_positions[self.particle_samples_indices]
 
         self.publish_avg_pose()
 
     def pose_callback(self, msg):
+        """
+        Called every time user manually sets the robot's pose
+        """
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         angle = msg.pose.pose.orientation.w
 
-        pose = np.array([[x, y , angle]])
-        self.particle_positions = np.vstack((self.particle_positions, pose)) if len(self.particle_positions) != 0 else pose
+        self.get_logger().info(f"initial pose set: {x}, {y}, {angle}")
+
+        # Initialize particles with normal distribution around the user-specified pose
+        def normalize_angle(angle):
+            # Normalize the angle to be within the range [-π, π]
+            normalized_angle = (angle + math.pi) % (2 * math.pi) - math.pi
+            return normalized_angle
+        
+        x = np.random.normal(loc=x, scale=1.0, size=(self.num_particles,1))
+        y = np.random.normal(loc=y, scale=1.0, size=(self.num_particles,1))
+        theta = np.random.normal(loc=angle, scale=1.0, size=(self.num_particles,1))
+
+        # Normalize angles
+        theta = np.apply_along_axis(normalize_angle, axis=0, arr=theta)
+
+        self.particle_positions = np.hstack((x, y, theta))
+        self.get_logger().info("self.particle_positions: %s" % self.particle_positions)
+
+
+        
 
 
 def main(args=None):

@@ -171,11 +171,14 @@ class SensorModel:
         # Index the sensor model table with observation to get a 100 x 201 array
         # Then, use scans to select the relevant probabilities for each particle
         # This results in an n x 100 array where each row corresponds to a particle
-        selected_probabilities = self.sensor_model_table[observation][:, scans][0]
-        
+        selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
+
         # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
         # length n vector containing probability of each particle being correct
-        return np.exp(np.sum(np.log(selected_probabilities), axis=1))
+        likelihoods = np.exp(np.sum(np.log(selected_probabilities), axis=1))
+        return likelihoods 
+
+
         ####################################
 
     def map_callback(self, map_msg):
