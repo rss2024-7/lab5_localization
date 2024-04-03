@@ -2,7 +2,7 @@ from localization.sensor_model import SensorModel
 from localization.motion_model import MotionModel
 
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, PoseArray
 
 from sensor_msgs.msg import LaserScan
 
@@ -63,6 +63,8 @@ class ParticleFilter(Node):
 
         self.odom_pub = self.create_publisher(Odometry, "/pf/pose/odom", 1)
 
+        self.particles_pub = self.create_publisher(PoseArray, "/particles", 1)
+
         # Initialize the models
         self.motion_model = MotionModel(self)
         self.sensor_model = SensorModel(self)
@@ -105,8 +107,8 @@ class ParticleFilter(Node):
         # rotation is around z-axis
         msg.pose.pose.orientation.x = 0.0
         msg.pose.pose.orientation.y = 0.0
-        msg.pose.pose.orientation.z = np.sqrt(1 - average_angle**2) # quaternion needs to be normalized
-        msg.pose.pose.orientation.w = average_angle
+        msg.pose.pose.orientation.z = np.sin(average_angle / 2)
+        msg.pose.pose.orientation.w = np.cos(average_angle / 2)
 
         msg.child_frame_id = '/base_link'
         # self.get_logger().info("%s" % average_pose)
@@ -122,19 +124,22 @@ class ParticleFilter(Node):
 
         odometry = np.array([x, y, angle])
 
-        # print(self.particle_positions)
-        self.motion_model.evaluate(self.particle_positions, odometry)
+        # update particle positions
+        self.particle_positions = self.motion_model.evaluate(self.particle_positions, odometry)
 
         self.publish_avg_pose()
 
     def laser_callback(self, msg):
         if len(self.particle_positions) == 0: return
+
+        # evaluate sensor model
         laser_ranges = np.random.choice(np.array(msg.ranges), 100)
         weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
+
         if weights is None:
-            # print("no weights") 
             return
 
+        # resample particles
         M = len(weights)
         weights /= np.sum(weights) # normalize so they add to 1
         self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
@@ -145,7 +150,7 @@ class ParticleFilter(Node):
         self.get_logger().info("initial pose")
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
-        angle = msg.pose.pose.orientation.w
+        angle = 2 * np.arctan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w)
 
         pose = np.array([[x, y , angle]])
         if len(self.particle_positions) != 0:
@@ -153,6 +158,33 @@ class ParticleFilter(Node):
         else:
             self.particle_positions = pose
         # self.get_logger().info("%s" % self.particle_positions)
+            
+        self.publish_particle_poses()
+
+    def publish_particle_poses(self):
+        poses = []
+        for i in range(len(self.particle_positions)):
+            particle = self.particle_positions[i, :]
+            msg = Pose()
+            
+            msg.position.x = particle[0]
+            msg.position.y = particle[1]
+
+            # rotation is around z-axis
+            angle = particle[2]
+            msg.orientation.x = 0.0
+            msg.orientation.y = 0.0
+            msg.orientation.z = np.sin(angle / 2)
+            msg.orientation.w = np.cos(angle / 2)
+
+            poses.append(msg)
+
+        msg = PoseArray()
+        msg.header.frame_id = '/map'
+
+        msg.poses = poses
+
+        self.particles_pub.publish(msg)
 
 
         
