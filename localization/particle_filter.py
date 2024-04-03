@@ -2,7 +2,7 @@ from localization.sensor_model import SensorModel
 from localization.motion_model import MotionModel
 
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, PoseArray
 
 from sensor_msgs.msg import LaserScan
 
@@ -68,6 +68,8 @@ class ParticleFilter(Node):
         #     "/map" frame.
 
         self.odom_pub = self.create_publisher(Odometry, "/pf/pose/odom", 1)
+
+        self.particles_pub = self.create_publisher(PoseArray, "/particles", 1)
 
         # Initialize the models
         self.motion_model = MotionModel(self)
@@ -140,7 +142,7 @@ class ParticleFilter(Node):
         
         odometry = np.array([x_vel * dt, y_vel * dt, angle_vel * dt])
 
-        # print(self.particle_positions)
+        # update particle positions
         self.particle_positions = self.motion_model.evaluate(self.particle_positions, odometry)
 
         self.publish_avg_pose()
@@ -149,12 +151,15 @@ class ParticleFilter(Node):
 
     def laser_callback(self, msg):
         if len(self.particle_positions) == 0: return
+
+        # evaluate sensor model
         laser_ranges = np.random.choice(np.array(msg.ranges), 100)
         weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
+
         if weights is None:
-            # print("no weights") 
             return
 
+        # resample particles
         M = len(weights)
         weights /= np.sum(weights) # normalize so they add to 1
         self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
@@ -162,14 +167,14 @@ class ParticleFilter(Node):
         self.particle_positions = self.particle_positions[self.particle_samples_indices]
 
         self.publish_avg_pose()
-
+        
     def pose_callback(self, msg):
         """
         Called every time user manually sets the robot's pose
         """
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
-        angle = msg.pose.pose.orientation.w
+        angle = 2 * np.arctan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w)
 
         self.get_logger().info(f"initial pose set: {x}, {y}, {angle}")
 
