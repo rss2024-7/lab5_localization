@@ -83,28 +83,70 @@ class ParticleFilter(Node):
         #
         # Publish a transformation frame between the map
         # and the particle_filter_frame.
+        self.particle_positions = np.array([])
+        self.laser_ranges = np.array([])
+        self.particle_samples_indices = np.array([])
+
+    def publish_avg_pose(self):
+        particle_samples = self.particle_positions[self.particle_samples_indices, :] if len(self.particle_samples_indices) != 0 else self.particle_positions
+        positions = particle_samples[:, :2]
+        angles = particle_samples[:, 2]
+
+        average_position = np.mean(positions, axis=0)
+        average_angle = np.arctan2(np.sum(np.sin(angles)), np.sum(np.cos(angles)))
+        
+        average_pose = np.hstack((average_position, average_angle))
+
+        msg = Odometry()
+        
+        msg.pose.pose.position.x = average_pose[0]
+        msg.pose.pose.position.y = average_pose[1]
+
+        msg.pose.pose.orientation.x = 0.0
+        msg.pose.pose.orientation.y = 0.0
+        msg.pose.pose.orientation.z = 1.0
+        msg.pose.pose.orientation.w = average_angle
+
+        msg.child_frame_id = '/base_link'
+        self.odom_pub.publish(msg)
 
     def odom_callback(self, msg):
-        # Odometry message
-        pose = msg.pose
+        if len(self.particle_positions) == 0: return
 
-        # [x, y, theta]
-        odometry = [msg.pose.pose.position.x, msg.pose.pose.position.y, 
-                    tf_transformations.euler_from_quaternion([msg.pose.pose.orientation.x, 
-                                                              msg.pose.pose.orientation.y, 
-                                                              msg.pose.pose.orientation.z, 
-                                                              msg.pose.pose.orientation.w])[2]]
+        x = msg.twist.twist.linear.x
+        y = msg.twist.twist.linear.y
+        angle = msg.twist.twist.angular.z
 
-        # self.get_logger().info(f"odometry: {odometry}")
+        odometry = np.array([x, y, angle])
 
-        self.motion_model.evaluate(self.particles, odometry)
+        # print(self.particle_positions)
+        self.motion_model.evaluate(self.particle_positions, odometry)
+
+        self.publish_avg_pose()
 
     def laser_callback(self, msg):
-        self.laser_ranges = np.random.choice(np.array(msg.ranges), 100)
+        if len(self.particle_positions) == 0: 
+            self.get_logger().info(f"self.particle_positions is empty.")
+            return
+        laser_ranges = np.random.choice(np.array(msg.ranges), 100)
+        weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
+        if weights is None: 
+            self.get_logger().info(f"self.sensor_model.evaluate() returned empty weights.")
+            return
+        
+        self.get_logger().info(f"np.shape(weights): {np.shape(weights)}")
+        M = len(weights)
+        self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
 
+        self.publish_avg_pose()
 
     def pose_callback(self, msg):
-        pass
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        angle = msg.pose.pose.orientation.w
+
+        pose = np.array([[x, y , angle]])
+        self.particle_positions = np.vstack((self.particle_positions, pose)) if len(self.particle_positions) != 0 else pose
 
 
 def main(args=None):

@@ -160,21 +160,22 @@ class SensorModel:
         scans = self.scan_sim.scan(particles)
         
         # convert units from meters to pixels
-        scans /= self.map_resolution * self.lidar_scale_to_map_scale
-        observation /= self.map_resolution * self.lidar_scale_to_map_scale
+        scans /= self.resolution  * self.lidar_scale_to_map_scale
+        observation /= self.resolution  * self.lidar_scale_to_map_scale
 
         # clip values (cap their values at z_max) in scans matrix
         z_max = self.table_width - 1
-        scans = np.clip(scans, 0, z_max)
+        observation = np.floor(np.clip(observation, 0, z_max)).astype(int)
+        scans = np.floor(np.clip(scans, 0, z_max)).astype(int)
 
         # Index the sensor model table with observation to get a 100 x 201 array
         # Then, use scans to select the relevant probabilities for each particle
         # This results in an n x 100 array where each row corresponds to a particle
-        selected_probabilities = self.sensor_model_table[observation][:, scans]
-
+        selected_probabilities = self.sensor_model_table[observation][:, scans][0]
+        
         # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
         # length n vector containing probability of each particle being correct
-        return np.sum(np.log(selected_probabilities), axis=1)
+        return np.exp(np.sum(np.log(selected_probabilities), axis=1))
         ####################################
 
     def map_callback(self, map_msg):
