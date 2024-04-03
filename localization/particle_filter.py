@@ -96,16 +96,21 @@ class ParticleFilter(Node):
         average_pose = np.hstack((average_position, average_angle))
 
         msg = Odometry()
+
+        msg.header.frame_id = '/map'
         
         msg.pose.pose.position.x = average_pose[0]
         msg.pose.pose.position.y = average_pose[1]
 
+        # rotation is around z-axis
         msg.pose.pose.orientation.x = 0.0
         msg.pose.pose.orientation.y = 0.0
-        msg.pose.pose.orientation.z = 1.0
+        msg.pose.pose.orientation.z = np.sqrt(1 - average_angle**2) # quaternion needs to be normalized
         msg.pose.pose.orientation.w = average_angle
 
         msg.child_frame_id = '/base_link'
+        # self.get_logger().info("%s" % average_pose)
+        # self.get_logger().info("%s" % average_angle)
         self.odom_pub.publish(msg)
 
     def odom_callback(self, msg):
@@ -131,11 +136,13 @@ class ParticleFilter(Node):
             return
 
         M = len(weights)
+        weights /= np.sum(weights) # normalize so they add to 1
         self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
 
         self.publish_avg_pose()
 
     def pose_callback(self, msg):
+        self.get_logger().info("initial pose")
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         angle = msg.pose.pose.orientation.w
@@ -145,6 +152,7 @@ class ParticleFilter(Node):
             self.particle_positions = np.vstack((self.particle_positions, pose)) 
         else:
             self.particle_positions = pose
+        # self.get_logger().info("%s" % self.particle_positions)
 
 
         
