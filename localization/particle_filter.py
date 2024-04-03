@@ -13,6 +13,8 @@ import numpy as np
 
 assert rclpy
 
+import time
+
 
 class ParticleFilter(Node):
 
@@ -84,6 +86,11 @@ class ParticleFilter(Node):
         self.laser_ranges = np.array([])
         self.particle_samples_indices = np.array([])
 
+        self.previous_time = time.perf_counter()
+
+        self.declare_parameter('num_particles', "default")
+        self.num_particles = self.get_parameter('num_particles').get_parameter_value().integer_value
+
     def publish_avg_pose(self):
         particle_samples = self.particle_positions
         if len(self.particle_samples_indices) != 0:
@@ -118,31 +125,41 @@ class ParticleFilter(Node):
     def odom_callback(self, msg):
         if len(self.particle_positions) == 0: return
 
-        x = msg.twist.twist.linear.x
-        y = msg.twist.twist.linear.y
-        angle = msg.twist.twist.angular.z
+        # manually time dt
+        current_time = time.perf_counter()  # maybe rclpy.time.Time()?
+        dt = current_time-self.previous_time
 
-        odometry = np.array([x, y, angle])
+        # relative to robot frame
+        x_vel = msg.twist.twist.linear.x
+        y_vel = msg.twist.twist.linear.y
+        angle_vel = msg.twist.twist.angular.z
 
-        # update particle positions
-        self.particle_positions = self.motion_model.evaluate(self.particle_positions, odometry)
+        
+        odometry = np.array([x_vel * dt, y_vel * dt, angle_vel * dt])
+
+        # print(self.particle_positions)
+        self.motion_model.evaluate(self.particle_positions, odometry)
 
         self.publish_avg_pose()
 
+        self.previous_time = current_time
+
     def laser_callback(self, msg):
         if len(self.particle_positions) == 0: return
-
-        # evaluate sensor model
         laser_ranges = np.random.choice(np.array(msg.ranges), 100)
         weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
-
         if weights is None:
+            # print("no weights") 
             return
 
-        # resample particles
         M = len(weights)
+
+        if np.sum(weights): return
+
         weights /= np.sum(weights) # normalize so they add to 1
         self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
+
+        self.particle_positions = self.particle_positions[self.particle_samples_indices]
 
         self.publish_avg_pose()
 
@@ -152,12 +169,23 @@ class ParticleFilter(Node):
         y = msg.pose.pose.position.y
         angle = 2 * np.arctan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w)
 
-        pose = np.array([[x, y , angle]])
-        if len(self.particle_positions) != 0:
-            self.particle_positions = np.vstack((self.particle_positions, pose)) 
-        else:
-            self.particle_positions = pose
-        # self.get_logger().info("%s" % self.particle_positions)
+        self.get_logger().info(f"initial pose set: {x}, {y}, {angle}")
+
+        # Initialize particles with normal distribution around the user-specified pose
+        def normalize_angle(angle):
+            # Normalize the angle to be within the range [-π, π]
+            normalized_angle = (angle + np.pi) % (2 * np.pi) - np.pi
+            return normalized_angle
+        
+        x = np.random.normal(loc=x, scale=1.0, size=(self.num_particles,1))
+        y = np.random.normal(loc=y, scale=1.0, size=(self.num_particles,1))
+        theta = np.random.normal(loc=angle, scale=1.0, size=(self.num_particles,1))
+
+        # Normalize angles
+        theta = np.apply_along_axis(normalize_angle, axis=0, arr=theta)
+
+        self.particle_positions = np.hstack((x, y, theta))
+        # self.get_logger().info("self.particle_positions: %s" % self.particle_positions)
             
         self.publish_particle_poses()
 
