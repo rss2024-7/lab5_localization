@@ -45,9 +45,7 @@ class MotionModel:
             return X
         
         # add noise
-        particles_random_noise = np.random.normal(0, 0.01, particles.shape)
-        particles += particles_random_noise
-        odometry_random_noise = np.random.normal(0, 0.01, odometry.shape)
+        odometry_random_noise = np.random.normal(0, 0.04, odometry.shape)
         odometry += odometry_random_noise
 
         # 3N x 3 Matrix (every particles row converted to transform matrix)

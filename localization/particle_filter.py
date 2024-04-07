@@ -15,6 +15,11 @@ assert rclpy
 
 import time
 
+import tf2_ros
+import tf_transformations
+import geometry_msgs
+from geometry_msgs.msg import TransformStamped
+from std_msgs.msg import Float32
 
 class ParticleFilter(Node):
 
@@ -92,6 +97,16 @@ class ParticleFilter(Node):
         self.declare_parameter('num_particles', "default")
         self.num_particles = self.get_parameter('num_particles').get_parameter_value().integer_value
 
+        self.br = tf2_ros.TransformBroadcaster(self)
+
+        self.tfBuffer = tf2_ros.Buffer()
+        self.listener = tf2_ros.TransformListener(self.tfBuffer, self)
+
+        self.dist_error_pub = self.create_publisher(Float32, '/distance_error', 10)
+        self.angle_error_pub = self.create_publisher(Float32, '/angle_error', 10)
+
+        self.num_beams_per_particle = self.get_parameter("num_beams_per_particle").get_parameter_value().integer_value
+
     def publish_avg_pose(self):
         self.publish_particle_poses()
         particle_samples = self.particle_positions
@@ -122,6 +137,52 @@ class ParticleFilter(Node):
         # self.get_logger().info("%s" % average_angle)
         self.odom_pub.publish(msg)
 
+
+        # Publish Transform
+
+        obj = geometry_msgs.msg.TransformStamped()
+
+        # current time
+        # obj.header.stamp = time.to_msg()
+
+        # frame names
+        obj.header.frame_id = '/map'
+        obj.child_frame_id = '/base_link_pf'
+
+        # translation component
+        obj.transform.translation.x = average_pose[0]
+        obj.transform.translation.y = average_pose[1]
+        obj.transform.translation.z = 0.0
+
+        # rotation (quaternion)
+        obj.transform.rotation.x = 0.0
+        obj.transform.rotation.y = 0.0
+        obj.transform.rotation.z = np.sin(average_angle / 2)
+        obj.transform.rotation.w = np.cos(average_angle / 2)
+
+        self.br.sendTransform(obj)
+
+        try:
+            tf_world_to_car: TransformStamped = self.tfBuffer.lookup_transform('map', 'base_link',
+                                                                                 rclpy.time.Time())
+            
+            x_expected = tf_world_to_car.transform.translation.x
+            y_expected = tf_world_to_car.transform.translation.y
+            angle_expected = 2 * np.arctan2(tf_world_to_car.transform.rotation.z, tf_world_to_car.transform.rotation.w)
+
+            distance_error_msg = Float32()
+            distance_error_msg.data = np.sqrt((x_expected - average_pose[0])**2 + (y_expected - average_pose[1])**2)
+            
+            angle_error_msg = Float32()
+            angle_error_msg.data = angle_expected - average_angle
+
+            self.dist_error_pub.publish(distance_error_msg)
+            self.angle_error_pub.publish(angle_error_msg)
+
+        except tf2_ros.TransformException:
+            self.get_logger().info('no transform from world to base_link_gt found')
+            return
+
     def odom_callback(self, msg):
         if len(self.particle_positions) == 0: return
 
@@ -146,37 +207,35 @@ class ParticleFilter(Node):
     def laser_callback(self, msg):
         if len(self.particle_positions) == 0: return
 
-        laser_ranges = np.random.choice(np.array(msg.ranges), 100)
-        weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
+        downsampled_indices = np.linspace(0, len(msg.ranges)-1, self.num_beams_per_particle).astype(int)
+        downsampled_laser_ranges = np.array(msg.ranges)[downsampled_indices]
+        # downsampled_laser_ranges = np.random.choice(np.array(msg.ranges), self.num_beams_per_particle)
+        weights = self.sensor_model.evaluate(self.particle_positions, downsampled_laser_ranges)
         if weights is None:
-            # print("no weights") 
             return
-
-        M = len(weights)
 
         if np.sum(weights) == 0: return
 
         weights /= np.sum(weights) # normalize so they add to 1
 
         # number of particles to keep
-        keep = 195
+        keep = int(self.num_particles * 0.975)
 
         # prevent error
         if np.count_nonzero(weights) < keep: return
 
         # sample without replacement (`keep` number of particles)
-        particle_samples_indices = np.random.choice(M, size=keep, p=weights, replace=False)
+        particle_samples_indices = np.random.choice(self.num_particles, size=keep, p=weights, replace=False)
 
         # for new particles, draw `number of particles` - `keep` particles and add some noise to them
-        repeat_particle_samples_indices = np.random.choice(M, size=200 - keep, p=weights) 
+        repeat_particle_samples_indices = np.random.choice(self.num_particles, size=self.num_particles - keep, p=weights) 
+        # repeat_particle_samples_indices = np.random.choice(M, size=200 - keep) 
         new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
-                                                + np.random.normal(0.0, 0.01, (200 - keep, 3))
+                                                + np.random.normal(0.0, 0.1, (self.num_particles - keep, 3))
 
         # update particles       
         self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
                                              new_particles))
-
-
 
         self.publish_avg_pose()
 

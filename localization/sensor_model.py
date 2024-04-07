@@ -123,7 +123,6 @@ class SensorModel:
     
         return
 
-
     def evaluate(self, particles, observation):
         """
         Evaluate how likely each particle is given
@@ -155,28 +154,81 @@ class SensorModel:
         # You will probably want to use this function
         # to perform ray tracing from all the particles.
         # This produces a matrix of size N x num_beams_per_particle 
-        
+
+        # n (number of particles) x num_beams_per_particle
         scans = self.scan_sim.scan(particles)
         
-        # convert to pixels
-        scans /= self.resolution * self.lidar_scale_to_map_scale
-        observation /= self.resolution * self.lidar_scale_to_map_scale
+        # convert units from meters to pixels
+        scans /= self.resolution  * self.lidar_scale_to_map_scale
+        observation /= self.resolution  * self.lidar_scale_to_map_scale
 
-        # clip values
+        # clip values (cap their values at z_max) in scans matrix
         z_max = self.table_width - 1
         observation = np.floor(np.clip(observation, 0, z_max)).astype(int)
         scans = np.floor(np.clip(scans, 0, z_max)).astype(int)
 
-        selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
 
-        # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
-        # length n vector containing probability of each particle being correct
+        # Get the indices from the scans array and the observation array
+        indices = (scans, observation)
+        # Use advanced indexing to retrieve all the probabilities at once
+        all_probs = self.sensor_model_table[indices]
+        # Multiply the probabilities along the second axis to get the cumulative likelihood for each particle
+        probabilities = np.prod(all_probs, axis=1)
+
+        return probabilities
+    # def evaluate(self, particles, observation):
+    #     """
+    #     Evaluate how likely each particle is given
+    #     the observed scan.
+
+    #     args:
+    #         particles: An Nx3 matrix of the form:
+
+    #             [x0 y0 theta0]
+    #             [x1 y0 theta1]
+    #             [    ...     ]
+
+    #         observation: A vector of lidar data measured
+    #             from the actual lidar. THIS IS Z_K. Each range in Z_K is Z_K^(i)
+
+    #     returns:
+    #        probabilities: A vector of length N representing
+    #            the probability of each particle existing
+    #            given the observation and the map.
+    #     """
+
+    #     if not self.map_set:
+    #         return
+
+    #     ####################################
+    #     # TODO
+    #     # Evaluate the sensor model here!
+    #     #
+    #     # You will probably want to use this function
+    #     # to perform ray tracing from all the particles.
+    #     # This produces a matrix of size N x num_beams_per_particle 
         
-        likelihoods = np.exp(np.sum(np.log(selected_probabilities), axis=1))
-        return likelihoods 
+    #     scans = self.scan_sim.scan(particles)
+        
+    #     # convert to pixels
+    #     scans /= self.resolution * self.lidar_scale_to_map_scale
+    #     observation /= self.resolution * self.lidar_scale_to_map_scale
+
+    #     # clip values
+    #     z_max = self.table_width - 1
+    #     observation = np.floor(np.clip(observation, 0, z_max)).astype(int)
+    #     scans = np.floor(np.clip(scans, 0, z_max)).astype(int)
+
+    #     selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
+
+    #     # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
+    #     # length n vector containing probability of each particle being correct
+        
+    #     likelihoods = np.exp(np.sum(np.log(selected_probabilities), axis=1))
+    #     return likelihoods 
 
 
-        ####################################
+    #     ####################################
 
     def map_callback(self, map_msg):
         # Convert the map to a numpy array
