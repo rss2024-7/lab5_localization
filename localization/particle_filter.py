@@ -15,11 +15,15 @@ import time
 
 assert rclpy
 
+import time
+
 
 class ParticleFilter(Node):
 
     def __init__(self):
         super().__init__("particle_filter")
+
+        self.get_logger().info('symlink check')
 
         self.declare_parameter('particle_filter_frame', "default")
         self.particle_filter_frame = self.get_parameter('particle_filter_frame').get_parameter_value().string_value
@@ -89,16 +93,16 @@ class ParticleFilter(Node):
         self.particle_positions = np.array([])
         self.laser_ranges = np.array([])
 
-        # the more often the value i appears in particle_samples_indices, the higher
-        # the weight of the pose particle_positions[i]
-        self.particle_samples_indices = np.array([])
+        self.previous_time = time.perf_counter()
+
+        self.declare_parameter('num_particles', "default")
+        self.num_particles = self.get_parameter('num_particles').get_parameter_value().integer_value
 
         self.previous_time = time.perf_counter()
 
     def publish_avg_pose(self):
+        self.publish_particle_poses()
         particle_samples = self.particle_positions
-        if len(self.particle_samples_indices) != 0:
-            particle_samples = self.particle_positions[self.particle_samples_indices, :]
 
         positions = particle_samples[:, :2]
         angles = particle_samples[:, 2]
@@ -142,7 +146,7 @@ class ParticleFilter(Node):
         
         odometry = np.array([x_vel * dt, y_vel * dt, angle_vel * dt])
 
-        # update particle positions
+        # print(self.particle_positions)
         self.particle_positions = self.motion_model.evaluate(self.particle_positions, odometry)
 
         self.publish_avg_pose()
@@ -152,17 +156,37 @@ class ParticleFilter(Node):
     def laser_callback(self, msg):
         if len(self.particle_positions) == 0: return
 
-        # evaluate sensor model
         laser_ranges = np.random.choice(np.array(msg.ranges), 100)
         weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
-
         if weights is None:
+            # print("no weights") 
             return
 
-        # resample particles
         M = len(weights)
+
+        if np.sum(weights) == 0: return
+
         weights /= np.sum(weights) # normalize so they add to 1
-        self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
+
+        # number of particles to keep
+        keep = 195
+
+        # prevent error
+        if np.count_nonzero(weights) < keep: return
+
+        # sample without replacement (`keep` number of particles)
+        particle_samples_indices = np.random.choice(M, size=keep, p=weights, replace=False)
+
+        # for new particles, draw `number of particles` - `keep` particles and add some noise to them
+        repeat_particle_samples_indices = np.random.choice(M, size=200 - keep, p=weights) 
+        new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
+                                                + np.random.normal(0.0, 0.01, (200 - keep, 3))
+
+        # update particles       
+        self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
+                                             new_particles))
+
+
 
         self.particle_positions = self.particle_positions[self.particle_samples_indices]
 
@@ -181,12 +205,41 @@ class ParticleFilter(Node):
         # Initialize particles with normal distribution around the user-specified pose
         def normalize_angle(angle):
             # Normalize the angle to be within the range [-π, π]
-            normalized_angle = (angle + math.pi) % (2 * math.pi) - math.pi
+            normalized_angle = (angle + np.pi) % (2 * np.pi) - np.pi
             return normalized_angle
         
         x = np.random.normal(loc=x, scale=1.0, size=(self.num_particles,1))
         y = np.random.normal(loc=y, scale=1.0, size=(self.num_particles,1))
         theta = np.random.normal(loc=angle, scale=1.0, size=(self.num_particles,1))
+
+        # Normalize angles
+        theta = np.apply_along_axis(normalize_angle, axis=0, arr=theta)
+
+        self.particle_positions = np.hstack((x, y, theta))
+        # self.get_logger().info("self.particle_positions: %s" % self.particle_positions)
+            
+        self.publish_particle_poses()
+
+    def publish_particle_poses(self):
+        poses = []
+        for i in range(len(self.particle_positions)):
+            particle = self.particle_positions[i, :]
+            msg = Pose()
+            
+            msg.position.x = particle[0]
+            msg.position.y = particle[1]
+
+            # rotation is around z-axis
+            angle = particle[2]
+            msg.orientation.x = 0.0
+            msg.orientation.y = 0.0
+            msg.orientation.z = np.sin(angle / 2)
+            msg.orientation.w = np.cos(angle / 2)
+
+            poses.append(msg)
+
+        msg = PoseArray()
+        msg.header.frame_id = '/map'
 
         # Normalize angles
         theta = np.apply_along_axis(normalize_angle, axis=0, arr=theta)
