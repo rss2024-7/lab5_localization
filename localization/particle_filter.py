@@ -236,11 +236,11 @@ class ParticleFilter(Node):
         if np.count_nonzero(weights) < keep: return
 
         # sample without replacement (`keep` number of particles)
-        particle_samples_indices = np.random.choice(len(weights), size=keep, p=weights, replace=False)
+        particle_samples_indices = np.random.choice(self.num_particles, size=keep, p=weights, replace=False)
 
 
         # # for new particles, draw `number of particles` - `keep` particles and add some noise to them
-        # repeat_particle_samples_indices = np.random.choice(M, size=self.num_particles - keep, p=weights) 
+        # repeat_particle_samples_indices = np.random.choice(self.num_particles, size=self.num_particles - keep, p=weights) 
         # new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
         #                                         + np.random.normal(0.0, 0.01, (self.num_particles - keep, 3))
         # self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
