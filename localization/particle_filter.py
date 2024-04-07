@@ -21,6 +21,8 @@ class ParticleFilter(Node):
     def __init__(self):
         super().__init__("particle_filter")
 
+        self.get_logger().info('symlink check')
+
         self.declare_parameter('particle_filter_frame', "default")
         self.particle_filter_frame = self.get_parameter('particle_filter_frame').get_parameter_value().string_value
 
@@ -84,7 +86,6 @@ class ParticleFilter(Node):
         # and the particle_filter_frame.
         self.particle_positions = np.array([])
         self.laser_ranges = np.array([])
-        self.particle_samples_indices = np.array([])
 
         self.previous_time = time.perf_counter()
 
@@ -92,9 +93,8 @@ class ParticleFilter(Node):
         self.num_particles = self.get_parameter('num_particles').get_parameter_value().integer_value
 
     def publish_avg_pose(self):
+        self.publish_particle_poses()
         particle_samples = self.particle_positions
-        if len(self.particle_samples_indices) != 0:
-            particle_samples = self.particle_positions[self.particle_samples_indices, :]
 
         positions = particle_samples[:, :2]
         angles = particle_samples[:, 2]
@@ -133,12 +133,11 @@ class ParticleFilter(Node):
         x_vel = msg.twist.twist.linear.x
         y_vel = msg.twist.twist.linear.y
         angle_vel = msg.twist.twist.angular.z
-
         
         odometry = np.array([x_vel * dt, y_vel * dt, angle_vel * dt])
 
         # print(self.particle_positions)
-        self.motion_model.evaluate(self.particle_positions, odometry)
+        self.particle_positions = self.motion_model.evaluate(self.particle_positions, odometry)
 
         self.publish_avg_pose()
 
@@ -146,6 +145,7 @@ class ParticleFilter(Node):
 
     def laser_callback(self, msg):
         if len(self.particle_positions) == 0: return
+
         laser_ranges = np.random.choice(np.array(msg.ranges), 100)
         weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
         if weights is None:
@@ -154,12 +154,29 @@ class ParticleFilter(Node):
 
         M = len(weights)
 
-        if np.sum(weights): return
+        if np.sum(weights) == 0: return
 
         weights /= np.sum(weights) # normalize so they add to 1
-        self.particle_samples_indices = np.random.choice(M, size=M, p=weights)
 
-        self.particle_positions = self.particle_positions[self.particle_samples_indices]
+        # number of particles to keep
+        keep = 195
+
+        # prevent error
+        if np.count_nonzero(weights) < keep: return
+
+        # sample without replacement (`keep` number of particles)
+        particle_samples_indices = np.random.choice(M, size=keep, p=weights, replace=False)
+
+        # for new particles, draw `number of particles` - `keep` particles and add some noise to them
+        repeat_particle_samples_indices = np.random.choice(M, size=200 - keep, p=weights) 
+        new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
+                                                + np.random.normal(0.0, 0.01, (200 - keep, 3))
+
+        # update particles       
+        self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
+                                             new_particles))
+
+
 
         self.publish_avg_pose()
 
