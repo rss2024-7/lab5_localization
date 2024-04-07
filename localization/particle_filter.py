@@ -99,13 +99,6 @@ class ParticleFilter(Node):
 
         self.previous_time = time.perf_counter()
 
-        # Create a simulated laser scan
-        self.scan_sim = PyScanSimulator2D(
-            self.num_beams_per_particle,
-            self.scan_field_of_view,
-            0,  # This is not the simulator, don't add noise
-            0.01,  # This is used as an epsilon
-            self.scan_theta_discretization)
 
     def publish_avg_pose(self):
         self.publish_particle_poses()
@@ -118,6 +111,7 @@ class ParticleFilter(Node):
         average_angle = np.arctan2(np.sum(np.sin(angles)), np.sum(np.cos(angles)))
         
         average_pose = np.hstack((average_position, average_angle))
+        self.average_pose = average_pose
 
         msg = Odometry()
 
@@ -183,14 +177,22 @@ class ParticleFilter(Node):
 
         # sample without replacement (`keep` number of particles)
         particle_samples_indices = np.random.choice(M, size=keep, p=weights, replace=False)
-        # for new particles, draw `number of particles` - `keep` particles and add some noise to them
-        repeat_particle_samples_indices = np.random.choice(M, size=self.num_particles - keep, p=weights) 
-        new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
-                                                + np.random.normal(0.0, 0.01, (self.num_particles - keep, 3))
 
-        # update particles       
-        self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
-                                             new_particles))
+
+        # # for new particles, draw `number of particles` - `keep` particles and add some noise to them
+        # repeat_particle_samples_indices = np.random.choice(M, size=self.num_particles - keep, p=weights) 
+        # new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
+        #                                         + np.random.normal(0.0, 0.01, (self.num_particles - keep, 3))
+        # self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
+        #                                     new_particles))       
+
+        if self.average_pose is not None:
+            new_particles = np.tile(self.average_pose, (self.num_particles - keep, 1))
+            noise = np.random.normal(0.0, 0.01, size=np.shape(new_particles))
+            new_particles += noise
+            # update particles       
+            self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
+                                                new_particles))
 
         self.publish_avg_pose()
 
@@ -201,6 +203,8 @@ class ParticleFilter(Node):
         y = msg.pose.pose.position.y
         angle = 2 * np.arctan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w)
 
+        self.average_pose = np.array([x, y, angle])
+
         self.get_logger().info(f"initial pose set: {x}, {y}, {angle}")
 
         # Initialize particles with normal distribution around the user-specified pose
@@ -209,9 +213,9 @@ class ParticleFilter(Node):
             normalized_angle = (angle + np.pi) % (2 * np.pi) - np.pi
             return normalized_angle
         
-        x = np.random.normal(loc=x, scale=0.5, size=(self.num_particles,1))
-        y = np.random.normal(loc=y, scale=0.5, size=(self.num_particles,1))
-        theta = np.random.normal(loc=angle, scale=0.5, size=(self.num_particles,1))
+        x = np.random.normal(loc=x, scale=1.0, size=(self.num_particles,1))
+        y = np.random.normal(loc=y, scale=1.0, size=(self.num_particles,1))
+        theta = np.random.normal(loc=angle, scale=1.0, size=(self.num_particles,1))
 
         # Normalize angles
         theta = np.apply_along_axis(normalize_angle, axis=0, arr=theta)

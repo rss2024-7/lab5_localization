@@ -196,42 +196,15 @@ class SensorModel:
         observation = np.floor(np.clip(observation, 0, z_max)).astype(int)
         scans = np.floor(np.clip(scans, 0, z_max)).astype(int)
 
-        # Index the sensor model table with observation to get a 100 x 201 array
-        # Then, use scans to select the relevant probabilities for each particle
-        # This results in an n x 100 array where each row corresponds to a particle
-        # selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
 
-
-        probabilities = np.ones(len(particles))
-        for i in range(scans.shape[0]):  # for each particle
-            for j in range(scans.shape[1]):  # for each beam in the scan
-                # Look up the probability from the sensor model table
-                prob = self.sensor_model_table[scans[i, j], observation[j]]
-                
-                # Multiply the probabilities to get a cumulative likelihood for the particle
-                probabilities[i] *= prob
+        # Get the indices from the scans array and the observation array
+        indices = (scans, observation)
+        # Use advanced indexing to retrieve all the probabilities at once
+        all_probs = self.sensor_model_table[indices]
+        # Multiply the probabilities along the second axis to get the cumulative likelihood for each particle
+        probabilities = np.prod(all_probs, axis=1)
 
         return probabilities
-
-
-
-
-
-
-        probabilities = []
-        for i in range(np.shape(scans)[0]):
-            probabilities_for_particle_i = self.sensor_model_table[scans[i], observation]
-            probabilities.append(probabilities_for_particle_i)
-        probabilities = np.array(probabilities)
-
-        print(f"probabilities: {probabilities}")
-
-        # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
-        # length n vector containing probability of each particle being correct
-        likelihoods = np.prod(probabilities, axis=1)
-        # likelihoods = np.sum(np.log(selected_probabilities), axis=1)
-        # likelihoods = np.sum(selected_probabilities, axis=1) / self.num_beams_per_particle
-        return likelihoods 
 
 
         ####################################
