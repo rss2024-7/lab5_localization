@@ -201,12 +201,10 @@ class SensorModel:
         # This results in an n x 100 array where each row corresponds to a particle
         # selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
 
-        # Initialize the probabilities array
-        probabilities = np.ones(len(particles))
 
-        # For each particle, compare its simulated scan with the actual observation
-        for i in range(scans.shape[0]):
-            for j in range(scans.shape[1]):
+        probabilities = np.ones(len(particles))
+        for i in range(scans.shape[0]):  # for each particle
+            for j in range(scans.shape[1]):  # for each beam in the scan
                 # Look up the probability from the sensor model table
                 prob = self.sensor_model_table[scans[i, j], observation[j]]
                 
@@ -214,6 +212,9 @@ class SensorModel:
                 probabilities[i] *= prob
 
         return probabilities
+
+
+
 
 
 
