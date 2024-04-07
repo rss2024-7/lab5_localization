@@ -70,6 +70,32 @@ class SensorModel:
             self.map_callback,
             1)
 
+    def plot_sensor_model_table(self):
+        # Assuming self.sensor_model_table is your 201x201 numpy array
+        sensor_model_table = self.sensor_model_table
+
+        # Create x and y indices
+        x = np.arange(sensor_model_table.shape[0])
+        y = np.arange(sensor_model_table.shape[1])
+        X, Y = np.meshgrid(x, y)
+
+        # Create a figure and a 3D axis
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plot the surface
+        surf = ax.plot_surface(X, Y, sensor_model_table, cmap='viridis')
+
+        # Add a color bar which maps values to colors
+        fig.colorbar(surf, shrink=0.5, aspect=5)
+
+        # Set labels
+        ax.set_xlabel('True Distance')
+        ax.set_ylabel('Measured Distance')
+        ax.set_zlabel('Probability')
+
+        plt.show()
+
     def precompute_sensor_model(self):
         """
         Generate and store a table which represents the sensor model.
@@ -120,6 +146,8 @@ class SensorModel:
 
         # normalize entire sensor model (So probabilities sum to 1)
         self.sensor_model_table /= np.sum(self.sensor_model_table, axis=0)
+
+        # self.plot_sensor_model_table()
     
         return
 
@@ -171,11 +199,37 @@ class SensorModel:
         # Index the sensor model table with observation to get a 100 x 201 array
         # Then, use scans to select the relevant probabilities for each particle
         # This results in an n x 100 array where each row corresponds to a particle
-        selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
+        # selected_probabilities = self.sensor_model_table[observation, :][:, scans][0]
+
+        # Initialize the probabilities array
+        probabilities = np.ones(len(particles))
+
+        # For each particle, compare its simulated scan with the actual observation
+        for i in range(scans.shape[0]):
+            for j in range(scans.shape[1]):
+                # Look up the probability from the sensor model table
+                prob = self.sensor_model_table[scans[i, j], observation[j]]
+                
+                # Multiply the probabilities to get a cumulative likelihood for the particle
+                probabilities[i] *= prob
+
+        return probabilities
+
+
+
+        probabilities = []
+        for i in range(np.shape(scans)[0]):
+            probabilities_for_particle_i = self.sensor_model_table[scans[i], observation]
+            probabilities.append(probabilities_for_particle_i)
+        probabilities = np.array(probabilities)
+
+        print(f"probabilities: {probabilities}")
 
         # Get total log probability for each particle (equivalent to taking product of log of probabilities of each scan)
         # length n vector containing probability of each particle being correct
-        likelihoods = np.exp(np.sum(np.log(selected_probabilities), axis=1))
+        likelihoods = np.prod(probabilities, axis=1)
+        # likelihoods = np.sum(np.log(selected_probabilities), axis=1)
+        # likelihoods = np.sum(selected_probabilities, axis=1) / self.num_beams_per_particle
         return likelihoods 
 
 
@@ -186,7 +240,7 @@ class SensorModel:
         self.map = np.array(map_msg.data, np.double) / 100.
         self.map = np.clip(self.map, 0, 1)
 
-        self.resolution = map_msg.info.resolution
+        self.resolution = map_msg.info.resolution  # 0.05040000006556511
 
         # Convert the origin to a tuple
         origin_p = map_msg.info.origin.position

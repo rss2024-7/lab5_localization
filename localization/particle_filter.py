@@ -1,5 +1,6 @@
 from localization.sensor_model import SensorModel
 from localization.motion_model import MotionModel
+from scan_simulator_2d import PyScanSimulator2D
 
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseWithCovarianceStamped, Pose, PoseArray
@@ -30,7 +31,6 @@ class ParticleFilter(Node):
 
         self.declare_parameter('num_particles', "default")
         self.num_particles = self.get_parameter('num_particles').get_parameter_value().integer_value
-
 
         #  *Important Note #1:* It is critical for your particle
         #     filter to obtain the following topic names from the
@@ -79,6 +79,10 @@ class ParticleFilter(Node):
         self.motion_model = MotionModel(self)
         self.sensor_model = SensorModel(self)
 
+        self.num_beams_per_particle = self.sensor_model.num_beams_per_particle
+        self.scan_field_of_view = self.sensor_model.scan_field_of_view
+        self.scan_theta_discretization = self.sensor_model.scan_theta_discretization
+
         self.get_logger().info("=============+READY+=============")
 
         # Implement the MCL algorithm
@@ -95,10 +99,13 @@ class ParticleFilter(Node):
 
         self.previous_time = time.perf_counter()
 
-        self.declare_parameter('num_particles', "default")
-        self.num_particles = self.get_parameter('num_particles').get_parameter_value().integer_value
-
-        self.previous_time = time.perf_counter()
+        # Create a simulated laser scan
+        self.scan_sim = PyScanSimulator2D(
+            self.num_beams_per_particle,
+            self.scan_field_of_view,
+            0,  # This is not the simulator, don't add noise
+            0.01,  # This is used as an epsilon
+            self.scan_theta_discretization)
 
     def publish_avg_pose(self):
         self.publish_particle_poses()
@@ -124,8 +131,6 @@ class ParticleFilter(Node):
         msg.pose.pose.orientation.y = 0.0
         msg.pose.pose.orientation.z = np.sin(average_angle / 2)
         msg.pose.pose.orientation.w = np.cos(average_angle / 2)
-
-        print(f"estimated_pose: {average_pose[0]}, {average_pose[1]}, {average_angle}")
 
         msg.child_frame_id = '/base_link'
         # self.get_logger().info("%s" % average_pose)
@@ -156,8 +161,10 @@ class ParticleFilter(Node):
     def laser_callback(self, msg):
         if len(self.particle_positions) == 0: return
 
-        laser_ranges = np.random.choice(np.array(msg.ranges), 100)
-        weights = self.sensor_model.evaluate(self.particle_positions, laser_ranges)
+        downsampled_indices = np.linspace(0, len(msg.ranges)-1, self.num_beams_per_particle).astype(int)
+        downsampled_laser_ranges = np.array(msg.ranges)[downsampled_indices]
+
+        weights = self.sensor_model.evaluate(self.particle_positions, downsampled_laser_ranges)
         if weights is None:
             # print("no weights") 
             return
@@ -169,33 +176,27 @@ class ParticleFilter(Node):
         weights /= np.sum(weights) # normalize so they add to 1
 
         # number of particles to keep
-        keep = 195
+        keep = int(0.5*self.num_particles)
 
         # prevent error
         if np.count_nonzero(weights) < keep: return
 
         # sample without replacement (`keep` number of particles)
         particle_samples_indices = np.random.choice(M, size=keep, p=weights, replace=False)
-
         # for new particles, draw `number of particles` - `keep` particles and add some noise to them
-        repeat_particle_samples_indices = np.random.choice(M, size=200 - keep, p=weights) 
+        repeat_particle_samples_indices = np.random.choice(M, size=self.num_particles - keep, p=weights) 
         new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
-                                                + np.random.normal(0.0, 0.01, (200 - keep, 3))
+                                                + np.random.normal(0.0, 0.01, (self.num_particles - keep, 3))
 
         # update particles       
         self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
                                              new_particles))
 
-
-
-        self.particle_positions = self.particle_positions[self.particle_samples_indices]
-
         self.publish_avg_pose()
-        
+
     def pose_callback(self, msg):
-        """
-        Called every time user manually sets the robot's pose
-        """
+
+        self.get_logger().info("initial pose")
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
         angle = 2 * np.arctan2(msg.pose.pose.orientation.z, msg.pose.pose.orientation.w)
@@ -208,9 +209,9 @@ class ParticleFilter(Node):
             normalized_angle = (angle + np.pi) % (2 * np.pi) - np.pi
             return normalized_angle
         
-        x = np.random.normal(loc=x, scale=1.0, size=(self.num_particles,1))
-        y = np.random.normal(loc=y, scale=1.0, size=(self.num_particles,1))
-        theta = np.random.normal(loc=angle, scale=1.0, size=(self.num_particles,1))
+        x = np.random.normal(loc=x, scale=0.5, size=(self.num_particles,1))
+        y = np.random.normal(loc=y, scale=0.5, size=(self.num_particles,1))
+        theta = np.random.normal(loc=angle, scale=0.5, size=(self.num_particles,1))
 
         # Normalize angles
         theta = np.apply_along_axis(normalize_angle, axis=0, arr=theta)
@@ -241,11 +242,9 @@ class ParticleFilter(Node):
         msg = PoseArray()
         msg.header.frame_id = '/map'
 
-        # Normalize angles
-        theta = np.apply_along_axis(normalize_angle, axis=0, arr=theta)
+        msg.poses = poses
 
-        self.particle_positions = np.hstack((x, y, theta))
-        self.get_logger().info("self.particle_positions: %s" % self.particle_positions)
+        self.particles_pub.publish(msg)
 
 
         
