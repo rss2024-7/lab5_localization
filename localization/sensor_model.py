@@ -123,7 +123,6 @@ class SensorModel:
     
         return
 
-
     def evaluate(self, particles, observation):
         """
         Evaluate how likely each particle is given
