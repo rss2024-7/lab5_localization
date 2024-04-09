@@ -224,18 +224,10 @@ class ParticleFilter(Node):
         # prevent error
         if np.count_nonzero(weights) < keep: return
 
-        # sample without replacement (`keep` number of particles)
-        particle_samples_indices = np.random.choice(self.num_particles, size=keep, p=weights, replace=False)
+        # sample with replacement
+        particle_samples_indices = np.random.choice(self.num_particles, size=self.num_particles, p=weights, replace=True)
 
-        # for new particles, draw `number of particles` - `keep` particles and add some noise to them
-        repeat_particle_samples_indices = np.random.choice(self.num_particles, size=self.num_particles - keep, p=weights) 
-        # repeat_particle_samples_indices = np.random.choice(M, size=200 - keep) 
-        new_particles = self.particle_positions[repeat_particle_samples_indices, :] \
-                                                + np.random.normal(0.0, 0.1, (self.num_particles - keep, 3))
-
-        # update particles       
-        self.particle_positions = np.vstack((self.particle_positions[particle_samples_indices, :], \
-                                             new_particles))
+        self.particle_positions = self.particle_positions[particle_samples_indices,:] + np.random.normal(0, 0.1, self.particle_positions.shape)
 
         self.publish_avg_pose()
 
